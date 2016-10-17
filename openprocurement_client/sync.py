@@ -6,10 +6,12 @@ from .client import TendersClientSync
 from gevent import spawn
 from gevent.queue import Queue
 
-RETRIEVER_DOWN_REQUESTS_SLEEP = 5
-RETRIEVER_UP_REQUESTS_SLEEP = 1
-RETRIEVER_UP_WAIT_SLEEP = 30
-RETRIEVERS_QUEUE_SIZE = 30
+DEFAULT_RETRIEVERS_PARAMS = {
+    'down_requests_sleep': 5,
+    'up_requests_sleep': 1,
+    'up_wait_sleep': 30,
+    'queue_size': 30
+}
 
 DEFAULT_API_HOST = 'https://lb.api-sandbox.openprocurement.org/'
 DEFAULT_API_VERSION = '2.3'
@@ -47,7 +49,7 @@ def start_sync(host=DEFAULT_API_HOST, version=DEFAULT_API_VERSION,
 
     response = backfard.sync_tenders(backfard_params)
 
-    queue = Queue()
+    queue = Queue(maxsize=retrievers_params['queue_size'])
     for tender in response.data:
         queue.put(tender)
     backfard_params['offset'] = response.next_page.offset
@@ -89,7 +91,7 @@ def restart_sync(up_worker, down_worker,
     return start_sync(host=host, version=version, key=key, extra_params=extra_params)
 
 
-def get_tenders(host=DEFAULT_API_HOST, version=DEFAULT_API_VERSION, key=DEFAULT_API_KEY, extra_params=DEFAULT_API_EXTRA_PARAMS):
+def get_tenders(host=DEFAULT_API_HOST, version=DEFAULT_API_VERSION, key=DEFAULT_API_KEY, extra_params=DEFAULT_API_EXTRA_PARAMS, retrievers_params=DEFAULT_RETRIEVERS_PARAMS):
     """
     Prepare iterator for retrieving from Openprocurement API.
 
@@ -138,7 +140,7 @@ def retriever_backward(queue, client, origin_cookie, params):
         if origin_cookie != client.headers['Cookie']:
             raise Exception('LB Server mismatch')
         logger.info('Backward: pause between requests')
-        sleep(RETRIEVER_DOWN_REQUESTS_SLEEP)
+        sleep(retrievers_params['down_requests_sleep'])
     logger.info('Backward: finished')
     return 0
 
@@ -158,10 +160,10 @@ def retriever_forward(queue, client, origin_cookie, params):
                 raise Exception('LB Server mismatch')
             if len(response.data) != 0:
                 logger.info('Forward: pause between requests')
-                sleep(RETRIEVER_UP_REQUESTS_SLEEP)
+                sleep(retrievers_params['UP_REQUESTS_SLEEP'])
 
         logger.info('Forward: pause after empty response')
-        sleep(RETRIEVER_UP_WAIT_SLEEP)
+        sleep(retrievers_params['UP_WAIT_SLEEP'])
 
         params['offset'] = response.next_page.offset
         response = client.sync_tenders(params)
